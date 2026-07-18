@@ -9,11 +9,22 @@ class AuthUserModel extends AuthUser {
   });
 
   factory AuthUserModel.fromJson(Map<String, dynamic> json) {
+    final role = _optionalString(json, const ['role']);
+
+    if (role == null) {
+      throw const FormatException('Required user role is missing.');
+    }
+
     return AuthUserModel(
-      id: json['id'] as String,
-      fullName: json['fullName'] as String,
-      emailOrPhone: json['emailOrPhone'] as String,
-      role: _roleFromString(json['role'] as String),
+      id: _requiredString(json, const ['id', 'userId', 'user_id']),
+      fullName: _requiredString(json, const ['fullName', 'full_name', 'name']),
+      emailOrPhone: _requiredString(json, const [
+        'emailOrPhone',
+        'email_or_phone',
+        'email',
+        'phone',
+      ]),
+      role: _roleFromString(role),
     );
   }
 
@@ -26,10 +37,36 @@ class AuthUserModel extends AuthUser {
     };
   }
 
+  static String _requiredString(Map<String, dynamic> json, List<String> keys) {
+    final value = _optionalString(json, keys);
+    if (value == null) {
+      throw const FormatException('Required user field is missing.');
+    }
+    return value;
+  }
+
+  static String? _optionalString(Map<String, dynamic> json, List<String> keys) {
+    for (final key in keys) {
+      final value = json[key];
+      if (value is String && value.trim().isNotEmpty) {
+        return value.trim();
+      }
+      if (value != null && value.toString().trim().isNotEmpty) {
+        return value.toString().trim();
+      }
+    }
+    return null;
+  }
+
   static UserRole _roleFromString(String value) {
-    return UserRole.values.firstWhere(
-      (role) => role.name == value,
-      orElse: () => UserRole.patient,
-    );
+    final normalized = value.trim().toLowerCase();
+
+    for (final role in UserRole.values) {
+      if (role.name == normalized) {
+        return role;
+      }
+    }
+
+    throw FormatException('Unsupported user role: $value');
   }
 }

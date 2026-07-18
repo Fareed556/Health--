@@ -1,6 +1,10 @@
+// Public named dependency parameters intentionally map to private fields.
+// ignore_for_file: prefer_initializing_formals
 import 'dart:collection';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
+
+import '../../../../core/logging/app_logger.dart';
 
 import '../../domain/entities/prescription_record.dart';
 import '../../domain/usecases/delete_prescription.dart';
@@ -11,10 +15,12 @@ enum PrescriptionControllerStatus { initial, loading, loaded, empty, error }
 
 class PrescriptionController extends ChangeNotifier {
   PrescriptionController({
-    required this._getPrescriptions,
-    required this._uploadPrescription,
-    required this._deletePrescription,
-  });
+    required GetPrescriptions getPrescriptions,
+    required UploadPrescription uploadPrescription,
+    required DeletePrescription deletePrescription,
+  }) : _getPrescriptions = getPrescriptions,
+       _uploadPrescription = uploadPrescription,
+       _deletePrescription = deletePrescription;
 
   static const String mockPatientId = 'mock_patient_001';
   static const int maxFileSizeBytes = 5 * 1024 * 1024;
@@ -29,6 +35,7 @@ class PrescriptionController extends ChangeNotifier {
   PrescriptionControllerStatus _status = PrescriptionControllerStatus.initial;
   bool _isUploading = false;
   bool _isDeleting = false;
+  bool _isDownloading = false;
   String? _errorMessage;
   bool _isDisposed = false;
 
@@ -36,6 +43,7 @@ class PrescriptionController extends ChangeNotifier {
   PrescriptionControllerStatus get status => _status;
   bool get isUploading => _isUploading;
   bool get isDeleting => _isDeleting;
+  bool get isDownloading => _isDownloading;
   String? get errorMessage => _errorMessage;
 
   bool get isLoading => _status == PrescriptionControllerStatus.loading;
@@ -73,7 +81,7 @@ class PrescriptionController extends ChangeNotifier {
 
       _setStatus(
         PrescriptionControllerStatus.error,
-        errorMessage: 'Failed to load prescriptions. Please try again.',
+        errorMessage: 'Failed to load health records. Please try again.',
       );
     }
   }
@@ -139,7 +147,6 @@ class PrescriptionController extends ChangeNotifier {
       ]);
 
       _setStatus(PrescriptionControllerStatus.loaded, errorMessage: null);
-
       return true;
     } catch (error, stackTrace) {
       _debugLog('pickAndUploadFile failed', error, stackTrace);
@@ -153,6 +160,49 @@ class PrescriptionController extends ChangeNotifier {
     }
   }
 
+  Future<bool> downloadRecord(PrescriptionRecord record) async {
+    if (_isDownloading) return false;
+
+    final bytes = record.fileBytes;
+
+    if (bytes == null || bytes.isEmpty) {
+      _setError(
+        'This record is not cached locally. A backend signed-download API is required.',
+      );
+      return false;
+    }
+
+    _setDownloading(true);
+    _clearError();
+
+    try {
+      final result = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save health record',
+        fileName: record.fileName,
+        type: FileType.custom,
+        allowedExtensions: [_extensionOf(record.fileName)],
+        bytes: bytes,
+      );
+
+      if (_isDisposed) return false;
+
+      if (kIsWeb) {
+        return true;
+      }
+
+      return result != null;
+    } catch (error, stackTrace) {
+      _debugLog('downloadRecord failed', error, stackTrace);
+
+      if (_isDisposed) return false;
+
+      _setError('Download failed. Please try again.');
+      return false;
+    } finally {
+      _setDownloading(false);
+    }
+  }
+
   Future<bool> deleteRecord({
     String patientId = mockPatientId,
     required String prescriptionId,
@@ -163,7 +213,7 @@ class PrescriptionController extends ChangeNotifier {
     final trimmedPrescriptionId = prescriptionId.trim();
 
     if (trimmedPatientId.isEmpty || trimmedPrescriptionId.isEmpty) {
-      _setError('Prescription information is missing.');
+      _setError('Record information is missing.');
       return false;
     }
 
@@ -238,6 +288,12 @@ class PrescriptionController extends ChangeNotifier {
     return null;
   }
 
+  String _extensionOf(String fileName) {
+    final parts = fileName.split('.');
+    if (parts.length < 2) return 'pdf';
+    return parts.last.toLowerCase();
+  }
+
   void _setStatus(
     PrescriptionControllerStatus status, {
     required String? errorMessage,
@@ -254,6 +310,11 @@ class PrescriptionController extends ChangeNotifier {
 
   void _setDeleting(bool value) {
     _isDeleting = value;
+    _safeNotifyListeners();
+  }
+
+  void _setDownloading(bool value) {
+    _isDownloading = value;
     _safeNotifyListeners();
   }
 
@@ -276,11 +337,7 @@ class PrescriptionController extends ChangeNotifier {
   }
 
   void _debugLog(String message, Object error, StackTrace stackTrace) {
-    if (!kDebugMode) return;
-
-    debugPrint('PrescriptionController: $message');
-    debugPrint('Error: $error');
-    debugPrintStack(stackTrace: stackTrace);
+    AppLogger.error('PrescriptionController.$message', error, stackTrace);
   }
 
   @override

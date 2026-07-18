@@ -30,6 +30,7 @@ android {
     defaultConfig {
         applicationId = "com.asaancare.app"
 
+        // flutter_secure_storage 10.x requires Android API 23 or newer.
         minSdk = flutter.minSdkVersion
 
         // Keep targetSdk controlled by Flutter for now.
